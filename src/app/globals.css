@@ -1,0 +1,89 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Be Vietnam Pro", "Segoe UI", sans-serif;
+  --color-canvas: #f4f7fb;
+  --color-surface: #ffffff;
+  --color-ink: #142033;
+  --color-body: #475569;
+  --color-muted: #94a3b8;
+  --color-line: #e2e8f0;
+  --color-brand: #ef4444;
+  --color-brand-dark: #dc2626;
+  --color-success: #059669;
+  --color-warning: #d97706;
+}
+
+* { box-sizing: border-box; }
+html { background: #f4f7fb; }
+body { margin: 0; color: #142033; background: #f4f7fb; font-family: "Be Vietnam Pro", "Segoe UI", sans-serif; font-size: 13px; font-weight: 400; }
+button, input, select, textarea { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .5; }
+
+@layer components {
+  .app-shell { @apply min-h-screen grid grid-cols-[224px_minmax(0,1fr)]; }
+  .sidebar { @apply sticky top-0 z-40 flex h-screen flex-col border-r border-line bg-white/90 px-3.5 py-4 backdrop-blur-xl; }
+  .brand { @apply flex items-center gap-2.5 px-2 pb-5; }
+  .brand-mark { @apply grid h-8 w-8 place-items-center rounded-[10px] bg-ink text-xs font-extrabold text-white; }
+  .nav-button { @apply flex w-full items-center gap-2.5 rounded-[10px] px-2.5 py-2.5 text-left text-body transition duration-150 hover:bg-slate-100 hover:text-ink active:scale-[.985]; }
+  .nav-button.active { @apply bg-slate-100 font-bold text-ink; }
+  .nav-icon { @apply grid h-[18px] w-[18px] place-items-center text-[10px] font-extrabold; }
+  .side-card { @apply rounded-xl border border-line bg-slate-50 p-3 text-[11px] leading-5 text-body; }
+  .topbar { @apply sticky top-0 z-30 flex h-16 items-center justify-between border-b border-line bg-canvas/90 px-7 backdrop-blur-xl; }
+  .content { @apply mx-auto max-w-[1450px] p-7; }
+  .page-head { @apply mb-5 flex items-end justify-between gap-5; }
+  .eyebrow { @apply text-[10px] font-extrabold uppercase tracking-[.09em] text-muted; }
+  .page-title { @apply mt-1 text-[26px] font-extrabold tracking-[-.035em] text-ink; }
+  .subtle { @apply text-xs leading-5 text-body; }
+  .card { @apply rounded-[14px] border border-line bg-white shadow-[0_1px_2px_rgba(15,23,42,.03)]; }
+  .section-title { @apply flex min-h-14 items-center justify-between gap-3 border-b border-line px-4 py-3; }
+  .section-title h2 { @apply text-[13px] font-extrabold; }
+  .btn { @apply inline-flex h-9 items-center justify-center gap-2 rounded-[10px] border border-slate-300 bg-white px-3 text-[11px] font-extrabold transition hover:bg-slate-50 active:scale-[.97] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500; }
+  .btn-primary { @apply border-ink bg-ink text-white hover:bg-slate-800; }
+  .btn-danger { @apply border-red-200 bg-red-50 text-red-600 hover:bg-red-100; }
+  .btn-mini { @apply h-8 px-2.5; }
+  .input { @apply h-9 rounded-[10px] border border-slate-300 bg-white px-3 text-xs text-ink outline-none transition placeholder:text-muted focus:border-slate-500 focus:ring-3 focus:ring-slate-200; }
+  .textarea { @apply min-h-[74px] w-full resize-y rounded-[10px] border border-slate-300 bg-white p-3 text-xs outline-none focus:border-slate-500 focus:ring-3 focus:ring-slate-200; }
+  .tabs { @apply inline-flex gap-1 rounded-[11px] bg-slate-100 p-1; }
+  .tab { @apply rounded-lg border-0 bg-transparent px-3 py-2 text-[11px] font-bold text-body transition; }
+  .tab.active { @apply bg-white text-ink shadow-sm; }
+  .table-wrap { @apply overflow-auto; }
+  .data-table { @apply w-full border-collapse; }
+  .data-table th { @apply sticky top-0 z-10 whitespace-nowrap border-b border-line bg-slate-50 px-3 py-2.5 text-left text-[10px] font-extrabold uppercase tracking-[.055em] text-body; }
+  .data-table td { @apply border-b border-slate-100 px-3 py-2.5 align-middle text-xs; }
+  .data-table tbody tr:hover { @apply bg-slate-50/80; }
+  .badge { @apply inline-flex rounded-full border border-line bg-slate-50 px-2 py-1 text-[10px] font-extrabold whitespace-nowrap; }
+  .badge.good { @apply border-emerald-200 bg-emerald-50 text-success; }
+  .badge.warn { @apply border-amber-200 bg-amber-50 text-warning; }
+  .badge.bad { @apply border-red-200 bg-red-50 text-red-600; }
+  .empty { @apply p-9 text-center text-body; }
+  .empty strong { @apply mb-1 block text-sm text-ink; }
+  .toolbar { @apply mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-white p-2; }
+  .notice { @apply rounded-[10px] border border-line bg-slate-50 p-3 text-[11px] leading-5 text-body; }
+  .rule-item { @apply grid w-full grid-cols-[1fr_auto] gap-3 rounded-[10px] border-0 bg-transparent p-3 text-left transition hover:bg-slate-50; }
+  .rule-item.active { @apply bg-slate-100 ring-1 ring-inset ring-slate-200; }
+  .pick-row { @apply grid grid-cols-[26px_1fr_auto] items-center gap-1.5 rounded-lg p-2 transition hover:bg-slate-50; }
+  .modal-backdrop { @apply fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-6 backdrop-blur-[6px]; }
+  .modal-shell { @apply flex max-h-[88vh] w-full max-w-[760px] flex-col overflow-hidden rounded-[18px] border border-line bg-white shadow-[0_28px_80px_rgba(15,23,42,.24)]; }
+}
+
+.counter-roll { display: inline-flex; height: 1em; overflow: hidden; align-items: baseline; }
+.digit-window { display: inline-block; width: .75em; height: 1em; overflow: hidden; }
+.digit-strip { display: flex; flex-direction: column; line-height: 1em; animation: digit-spin .6s cubic-bezier(.2,.95,.25,1) both; }
+.digit-strip > span { display: block; height: 1em; text-align: center; }
+.toast { animation: toast-in .2s ease-out; }
+.view-in { animation: view-in .2s ease-out; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px) scale(.98); } }
+@keyframes view-in { from { opacity: 0; transform: translateY(5px); } }
+@keyframes digit-spin { from { transform: translateY(0); } to { transform: translateY(calc(-1em * var(--digit))); } }
+
+@media (max-width: 760px) {
+  .app-shell { grid-template-columns: 1fr; }
+  .sidebar { position: fixed; left: 0; transform: translateX(-105%); width: 224px; transition: transform .2s ease; box-shadow: 20px 0 60px rgba(15,23,42,.18); }
+  .sidebar.open { transform: translateX(0); }
+  .topbar { padding-inline: 14px; }
+  .content { padding: 18px 12px; }
+  .page-head { align-items: flex-start; flex-direction: column; }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
