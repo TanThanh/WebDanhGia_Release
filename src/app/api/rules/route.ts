@@ -8,7 +8,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Thiếu tên quy tắc hoặc số điểm không hợp lệ." }, { status: 400 });
     }
 
-    const type = input.points > 0 ? "CREDIT" : "DEBIT";
+    const type = (input.points > 0 ? "CREDIT" : "DEBIT") as "CREDIT" | "DEBIT";
 
     const newRule = await updateDatabase((database) => {
       // Auto-generate ID like "C001" or "D001"
@@ -37,7 +37,7 @@ export async function POST(request: Request) {
     });
 
     return NextResponse.json({ success: true, rule: newRule });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message || "Lỗi server." }, { status: 500 });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Lỗi server." }, { status: 500 });
   }
 }

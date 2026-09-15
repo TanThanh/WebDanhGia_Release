@@ -1,11 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { autoMap, collapseMergedHeaderColumns, detectClassHint, detectHeaderIndex, extractClassHint, ImportField, ImportMapping, normalizeText, SheetMerge } from "@/lib/normalization";
 import { calculateScore, classifyScore } from "@/lib/scoring";
+import { ReportView } from "./report-view";
+import { RecordView } from "./record-view";
+import { VersionDialog } from "./version-dialog";
+import { getSchoolYearStartDate, getWeekIndex, getWeekRange } from "@/lib/report-utils";
+import { APP_RELEASE } from "@/lib/app-version";
+import { buildActivityRows } from "@/lib/activity-utils";
 
-type View = "dashboard" | "record" | "students" | "rules" | "activity" | "import";
+type View = "dashboard" | "report" | "record" | "students" | "rules" | "activity" | "import";
 type RuleType = "CREDIT" | "DEBIT";
 type Student = { id: string; ordinal: string; fullName: string; dateOfBirth: string; gender: string; phone: string; note: string; className: string };
 type PointRule = { id: string; type: RuleType; points: number; category: string; title: string; note?: string | null };
@@ -15,14 +21,15 @@ type Bootstrap = { students: Student[]; rules: PointRule[]; transactions: PointT
 type Toast = { id: number; message: string; batchId?: string };
 
 const nav: { id: View; label: string; glyph: string }[] = [
-  { id: "dashboard", label: "Tổng quan", glyph: "▦" }, { id: "record", label: "Ghi nhận", glyph: "+" },
+  { id: "dashboard", label: "Tổng quan", glyph: "▦" }, { id: "report", label: "Báo cáo", glyph: "◫" }, { id: "record", label: "Ghi nhận", glyph: "+" },
   { id: "students", label: "Học sinh", glyph: "◎" }, { id: "rules", label: "Quy tắc điểm", glyph: "≡" },
   { id: "activity", label: "Nhật ký", glyph: "⌁" }, { id: "import", label: "Import / Export", glyph: "⇩" },
 ];
-const labels: Record<View, string> = { dashboard: "Tổng quan", record: "Ghi nhận", students: "Học sinh", rules: "Quy tắc điểm", activity: "Nhật ký", import: "Import / Export" };
+const labels: Record<View, string> = { dashboard: "Tổng quan", report: "Báo cáo", record: "Ghi nhận", students: "Học sinh", rules: "Quy tắc điểm", activity: "Nhật ký", import: "Import / Export" };
 const today = () => new Date().toISOString().slice(0, 10);
 const fmt = (value: number) => value.toLocaleString("vi-VN", { maximumFractionDigits: 1 });
 const fmtDate = (value: string) => value ? new Date(`${value.slice(0, 10)}T00:00:00`).toLocaleDateString("vi-VN") : "—";
+const fmtTime = (value: string) => value ? new Date(value).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }) : "";
 const initials = (name: string) => name.trim().split(/\s+/).pop() || "";
 const emptyData: Bootstrap = { students: [], rules: [], transactions: [], classes: [], settings: { schoolYear: "2026–2027", semester: "Học kỳ I", startingScore: 50, capScore: true } };
 
@@ -47,7 +54,9 @@ export function DashboardApp() {
   const [view, setView] = useState<View>("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [classFilter, setClassFilter] = useState("__all");
+  const [selectedWeek, setSelectedWeek] = useState<number | undefined>();
   const [studentModal, setStudentModal] = useState<string | null>(null);
+  const [versionOpen, setVersionOpen] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const refresh = useCallback(async () => {
@@ -58,7 +67,7 @@ export function DashboardApp() {
   }, []);
   useEffect(() => { queueMicrotask(() => void refresh()); }, [refresh]);
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { setStudentModal(null); setSidebarOpen(false); } };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { setStudentModal(null); setVersionOpen(false); setSidebarOpen(false); } };
     window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey);
   }, []);
   const toast = (message: string, batchId?: string) => {
@@ -72,21 +81,23 @@ export function DashboardApp() {
   const activeTransactions = useMemo(() => data.transactions.filter((item) => item.status === "ACTIVE"), [data.transactions]);
   const scoreFor = useCallback((studentId: string) => calculateScore(activeTransactions.filter((item) => item.studentId === studentId).map((item) => item.points), data.settings.capScore), [activeTransactions, data.settings.capScore]);
   const go = (next: View) => { setView(next); setSidebarOpen(false); };
+  const goReport = (week?: number) => { if (week) setSelectedWeek(week); go("report"); };
 
   return <div className="app-shell">
     <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
       <div className="brand"><div className="brand-mark">RL</div><div><div className="text-sm font-extrabold">Rèn luyện</div><div className="text-[11px] text-body">THCS Phan Tây Hồ</div></div></div>
       <nav className="grid gap-1">{nav.map((item) => <button key={item.id} className={`nav-button ${view === item.id ? "active" : ""}`} onClick={() => go(item.id)}><span className="nav-icon">{item.glyph}</span><span>{item.label}</span></button>)}</nav>
       <div className="flex-1" />
-      <div className="side-card"><strong className="text-ink">Năm học {data.settings.schoolYear}</strong><br />38 lỗi trừ điểm · 3 nội dung cộng điểm.<br />Dữ liệu lưu trong JSON server.</div>
+      <div className="side-card version-card"><div className="version-card-top"><strong className="text-ink">Năm học {data.settings.schoolYear}</strong><span>v{APP_RELEASE.version}</span></div><div className="version-card-title">{APP_RELEASE.title}</div><button className="version-card-link" onClick={() => setVersionOpen(true)}>Xem nội dung cập nhật →</button></div>
     </aside>
     <main className="min-w-0">
       <header className="topbar"><div className="flex items-center gap-2"><button className="btn btn-mini md:hidden" aria-label="Mở menu" onClick={() => setSidebarOpen(true)}>☰</button><span className="text-xs text-body">{labels[view]}</span></div><div className="flex items-center gap-2"><select className="input" value={classFilter} onChange={(event) => setClassFilter(event.target.value)}><option value="__all">Tất cả lớp</option>{data.classes.map((item) => <option key={item.id} value={item.name}>{item.name}</option>)}</select><select className="input hidden sm:block" value={data.settings.semester} onChange={async (event) => { const semester = event.target.value; setData((current) => ({ ...current, settings: { ...current.settings, semester } })); await jsonRequest("/api/settings", { method: "PATCH", body: JSON.stringify({ semester }) }); }}><option>Học kỳ I</option><option>Học kỳ II</option></select></div></header>
       <div className="content view-in">
         {loading && <div className="card empty"><strong>Đang tải workspace</strong>Đang đọc dữ liệu JSON…</div>}
         {!loading && error && <div className="card empty"><strong>Chưa kết nối được database</strong><span>{error}</span><div className="mt-4"><button className="btn" onClick={() => void refresh()}>Thử lại</button></div></div>}
-        {!loading && !error && view === "dashboard" && <DashboardView students={filteredStudents} transactions={activeTransactions} scoreFor={scoreFor} onGo={go} onStudent={setStudentModal} />}
-        {!loading && !error && view === "record" && <RecordView students={filteredStudents} rules={data.rules} scoreFor={scoreFor} onSaved={async (message, batchId) => { toast(message, batchId); await refresh(); }} />}
+        {!loading && !error && view === "dashboard" && <DashboardView students={filteredStudents} transactions={activeTransactions} scoreFor={scoreFor} onGo={go} onGoReport={goReport} onStudent={setStudentModal} />}
+        {!loading && !error && view === "report" && <ReportView students={data.students} transactions={activeTransactions} initialWeek={selectedWeek} classFilter={classFilter} onStudent={setStudentModal} />}
+        {!loading && !error && view === "record" && <RecordView students={filteredStudents} rules={data.rules} transactions={activeTransactions} classFilter={classFilter} scoreFor={scoreFor} onSaved={async (message, batchId) => { toast(message, batchId); await refresh(); }} />}
         {!loading && !error && view === "students" && <StudentsView students={filteredStudents} transactions={activeTransactions} classFilter={classFilter} scoreFor={scoreFor} onGo={go} onStudent={setStudentModal} />}
         {!loading && !error && view === "rules" && <RulesView rules={data.rules} onAdded={async () => { toast("Đã tạo quy tắc thành công."); await refresh(); }} />}
         {!loading && !error && view === "activity" && <ActivityView transactions={data.transactions.filter((item) => classFilter === "__all" || item.className === classFilter)} onUndo={async (batchId) => { await jsonRequest(`/api/transaction-batches/${batchId}/undo`, { method: "POST" }); toast("Đã hoàn tác batch."); await refresh(); }} />}
@@ -94,6 +105,7 @@ export function DashboardApp() {
       </div>
     </main>
     {studentModal && <StudentDetail student={data.students.find((item) => item.id === studentModal)} transactions={data.transactions.filter((item) => item.studentId === studentModal)} score={scoreFor(studentModal)} onClose={() => setStudentModal(null)} onUpdated={async (msg) => { toast(msg); await refresh(); }} />}
+    {versionOpen && <VersionDialog onClose={() => setVersionOpen(false)} />}
     <div className="fixed bottom-5 right-5 z-[60] grid gap-2">{toasts.map((item) => <div key={item.id} className="toast flex min-w-[290px] items-center justify-between gap-3 rounded-xl bg-ink px-4 py-3 text-white shadow-xl"><div><div className="text-xs font-bold">{item.message}</div><small className="text-slate-300">Rèn luyện</small></div>{item.batchId && <button className="rounded-lg bg-white/10 px-2.5 py-1.5 text-[11px] font-bold" onClick={async () => { await jsonRequest(`/api/transaction-batches/${item.batchId}/undo`, { method: "POST" }); setToasts((items) => items.filter((entry) => entry.id !== item.id)); toast("Đã hoàn tác thao tác vừa ghi."); await refresh(); }}>Hoàn tác</button>}</div>)}</div>
   </div>;
 }
@@ -105,18 +117,14 @@ function PageHead({ eyebrow, title, sub, action }: { eyebrow: string; title: str
 function Empty({ title, children }: { title: string; children: React.ReactNode }) { return <div className="empty"><strong>{title}</strong>{children}</div>; }
 function ratingClass(score: number) { const rating = classifyScore(score); return rating === "Tốt" || rating === "Khá" ? "good" : rating === "Đạt" ? "warn" : "bad"; }
 
-function DashboardView({ students, transactions, scoreFor, onGo, onStudent }: { students: Student[]; transactions: PointTransaction[]; scoreFor: (id: string) => ReturnType<typeof calculateScore>; onGo: (view: View) => void; onStudent: (id: string) => void }) {
+function DashboardView({ students, transactions, scoreFor, onGo, onGoReport, onStudent }: { students: Student[]; transactions: PointTransaction[]; scoreFor: (id: string) => ReturnType<typeof calculateScore>; onGo: (view: View) => void; onGoReport: (week?: number) => void; onStudent: (id: string) => void }) {
   const ids = new Set(students.map((student) => student.id));
   const scoped = transactions.filter((item) => ids.has(item.studentId));
-  const average = students.length ? students.reduce((sum, student) => sum + scoreFor(student.id).score, 0) / students.length : null;
-  
-  const startDate = new Date("2026-09-07T00:00:00+07:00");
-  const now = new Date();
-  const diffTime = now.getTime() - startDate.getTime();
-  const currentWeek = diffTime < 0 ? 1 : Math.floor(diffTime / (1000 * 60 * 60 * 24 * 7)) + 1;
-  const weekStart = new Date(startDate.getTime() + (currentWeek - 1) * 7 * 24 * 60 * 60 * 1000);
-  const weekEnd = new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000);
-  const thisWeekScoped = scoped.filter(item => { const d = new Date(item.activityDate); return d >= weekStart && d < weekEnd; });
+  const startDate = getSchoolYearStartDate();
+  const currentWeek = getWeekIndex(new Date(), startDate);
+
+  const weekRange = getWeekRange(currentWeek, startDate);
+  const thisWeekScoped = scoped.filter(item => { const d = new Date(item.activityDate); return d >= weekRange.start && d < weekRange.end; });
   const plusStudents = new Set(thisWeekScoped.filter(item => item.points > 0).map(item => item.studentId)).size;
   const minusStudents = new Set(thisWeekScoped.filter(item => item.points < 0).map(item => item.studentId)).size;
 
@@ -128,8 +136,7 @@ function DashboardView({ students, transactions, scoreFor, onGo, onStudent }: { 
   const low = [...students].sort((a, b) => scoreFor(a.id).score - scoreFor(b.id).score).slice(0, 6);
   const weeklyStats = Array.from({ length: currentWeek }, (_, i) => {
     const w = i + 1;
-    const s = new Date(startDate.getTime() + i * 7 * 24 * 60 * 60 * 1000);
-    const e = new Date(s.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const { start: s, end: e } = getWeekRange(w, startDate);
     const wScoped = scoped.filter(item => { const d = new Date(item.activityDate); return d >= s && d < e; });
     const pCount = wScoped.filter(item => item.points > 0).length;
     const mCount = wScoped.filter(item => item.points < 0).length;
@@ -138,7 +145,7 @@ function DashboardView({ students, transactions, scoreFor, onGo, onStudent }: { 
     return {
       week: w,
       start: s.toLocaleDateString("vi-VN", { day: '2-digit', month: '2-digit' }),
-      end: new Date(e.getTime() - 86400000).toLocaleDateString("vi-VN", { day: '2-digit', month: '2-digit' }),
+      end: e.toLocaleDateString("vi-VN", { day: '2-digit', month: '2-digit' }),
       pCount, mCount, pStudents, mStudents
     };
   }).reverse();
@@ -147,7 +154,7 @@ function DashboardView({ students, transactions, scoreFor, onGo, onStudent }: { 
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{cards.map(([label, value, decimals, hint]) => <div className="card flex min-h-28 flex-col justify-between p-4" key={label}><div className="text-xs text-body font-bold">{label}</div><div className="mt-2 flex flex-col"><div className="text-[29px] font-extrabold tracking-[-.055em] leading-[1.1]"><RollingNumber value={value} decimals={decimals} /></div><div className="text-[10px] text-muted mt-1">{hint}</div></div></div>)}</div>
     
     <div className="mt-3 card">
-      <div className="section-title"><h2>Báo cáo theo tuần</h2></div>
+      <div className="section-title"><h2>Báo cáo theo tuần</h2><button className="btn btn-mini" onClick={() => onGoReport()}>Xem báo cáo chi tiết</button></div>
       <div className="table-wrap max-h-[300px] overflow-auto">
         <table className="data-table">
           <thead>
@@ -162,7 +169,7 @@ function DashboardView({ students, transactions, scoreFor, onGo, onStudent }: { 
           </thead>
           <tbody>
             {weeklyStats.map(w => (
-              <tr key={w.week}>
+              <tr key={w.week} onClick={() => onGoReport(w.week)} className="cursor-pointer hover:bg-slate-50 transition-colors" title="Nhấn để xem báo cáo chi tiết">
                 <td className="font-bold text-ink">Tuần {w.week}</td>
                 <td>{w.start} – {w.end}</td>
                 <td className={`text-right font-extrabold ${w.pCount > 0 ? "text-success" : "text-muted"}`}>{w.pCount > 0 ? `+${w.pCount}` : "0"}</td>
@@ -181,200 +188,6 @@ function DashboardView({ students, transactions, scoreFor, onGo, onStudent }: { 
       <div className="card"><div className="section-title"><h2>Điểm thấp nhất</h2><span className="text-xs text-body">Top 6</span></div><div className="p-1">{low.map((student) => { const score = scoreFor(student.id).score; return <button key={student.id} className="grid w-full grid-cols-[36px_1fr_auto] items-center gap-2.5 rounded-[10px] p-2.5 text-left hover:bg-slate-50" onClick={() => onStudent(student.id)}><div className="grid h-9 w-9 place-items-center rounded-[10px] border border-line bg-slate-50 text-[11px] font-extrabold">{initials(student.fullName)}</div><div><div className="font-bold">{student.fullName}</div><div className="text-[11px] text-body">{student.className} · {classifyScore(score)}</div></div><div className="font-extrabold">{fmt(score)}</div></button>; })}{!low.length && <Empty title="Chưa có học sinh">Import danh sách để xem thống kê.</Empty>}</div></div></div>
   </>;
 }
-type RuleInput = { id: string; query: string; selected: PointRule | null };
-type CustomInput = { id: string; title: string; points: string; selected: PointRule | null };
-
-function FastRecordRow({ student, rules, score, date, onSaved, onApplyToAll }: { student: Student; rules: PointRule[]; score: number; date: string; onSaved: (message: string, batchId: string) => Promise<void>; onApplyToAll: (ruleId: string | null, customTitle: string, customPoints: number) => Promise<void> }) {
-  const [ruleInputs, setRuleInputs] = useState<RuleInput[]>([{ id: Math.random().toString(), query: "", selected: null }]);
-  const [customInputs, setCustomInputs] = useState<CustomInput[]>([{ id: Math.random().toString(), title: "", points: "", selected: null }]);
-  const [saving, setSaving] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const getVisibleDebitRules = (query: string, selected: PointRule | null) => {
-    if (!query.trim() || selected?.title === query) return [];
-    const q = normalizeText(query);
-    return rules.filter((r) => r.type === "DEBIT" && normalizeText(`${r.title} ${r.category} ${r.id}`).includes(q)).slice(0, 5);
-  };
-
-  const getVisibleCreditRules = (query: string, selected: PointRule | null) => {
-    if (!query.trim() || selected?.title === query) return [];
-    const q = normalizeText(query);
-    return rules.filter((r) => r.type === "CREDIT" && normalizeText(`${r.title} ${r.category} ${r.id}`).includes(q)).slice(0, 5);
-  };
-
-  const commitAll = async () => {
-    const validRules = ruleInputs.map(ri => {
-      if (ri.selected) return ri.selected;
-      if (ri.query.trim()) {
-        const vis = getVisibleDebitRules(ri.query, null);
-        if (vis.length > 0) return vis[0];
-      }
-      return null;
-    }).filter(r => r !== null) as PointRule[];
-
-    const validCustom = customInputs.filter(ci => {
-      if (ci.selected) return true;
-      const pts = parseFloat(ci.points);
-      return ci.title.trim() && !isNaN(pts) && pts > 0;
-    });
-
-    if (validRules.length === 0 && validCustom.length === 0) return;
-
-    setSaving(true);
-    try {
-      const messages: string[] = [];
-      let lastBatch = "";
-      
-      for (const rule of validRules) {
-        const res = await jsonRequest<{ batchId: string; points: number }>("/api/point-transactions", { method: "POST", body: JSON.stringify({ ruleId: rule.id, studentIds: [student.id], activityDate: date, note: "" }) });
-        messages.push(`${res.points > 0 ? "+" : ""}${fmt(res.points)}`);
-        lastBatch = res.batchId;
-      }
-      
-      for (const custom of validCustom) {
-        let res;
-        if (custom.selected) {
-          res = await jsonRequest<{ batchId: string; points: number }>("/api/point-transactions", { method: "POST", body: JSON.stringify({ ruleId: custom.selected.id, studentIds: [student.id], activityDate: date, note: "" }) });
-        } else {
-          res = await jsonRequest<{ batchId: string; points: number }>("/api/point-transactions", { method: "POST", body: JSON.stringify({ customTitle: custom.title.trim(), customPoints: parseFloat(custom.points), studentIds: [student.id], activityDate: date, note: "" }) });
-        }
-        messages.push(`+${fmt(res.points)}`);
-        lastBatch = res.batchId;
-      }
-
-      setRuleInputs([{ id: Math.random().toString(), query: "", selected: null }]);
-      setCustomInputs([{ id: Math.random().toString(), title: "", points: "", selected: null }]);
-      await onSaved(`Đã ghi nhận ${messages.join(", ")} cho ${student.fullName}`, lastBatch);
-    } finally {
-      setSaving(false);
-      inputRef.current?.focus();
-    }
-  };
-
-  return <div className="grid grid-cols-[36px_250px_1fr_1fr] items-start gap-4 rounded-[10px] p-2.5 hover:bg-slate-50 border-b border-line last:border-0">
-    <div className="grid h-9 w-9 place-items-center rounded-[10px] border border-line bg-slate-50 text-[11px] font-extrabold">{initials(student.fullName)}</div>
-    <div>
-      <div className="font-bold">{student.fullName}</div>
-      <div className="text-[11px] text-body">{student.className} · Điểm hiện tại: <strong className={score >= 80 ? "text-success" : score < 50 ? "text-red-600" : ""}>{fmt(score)}</strong></div>
-    </div>
-    <div className="flex flex-col gap-2">
-      {ruleInputs.map((item, index) => {
-        const visRules = getVisibleDebitRules(item.query, item.selected);
-        return (
-          <div key={item.id} className="relative flex gap-1.5">
-            <div className="relative flex-1">
-              <input ref={index === 0 ? inputRef : null} className={`input w-full text-sm ${item.selected ? "pr-[50px]" : ""}`} placeholder="Tìm lỗi vi phạm..." value={item.query} onChange={(e) => {
-                setRuleInputs(prev => prev.map(p => p.id === item.id ? { ...p, query: e.target.value, selected: null } : p));
-              }} disabled={saving} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void commitAll(); } }} />
-              {item.selected && <div className={`absolute right-2.5 top-1/2 -translate-y-1/2 text-[13px] font-extrabold ${item.selected.type === "CREDIT" ? "text-success" : "text-red-600"}`}>{item.selected.type === "CREDIT" ? "+" : "−"}{fmt(item.selected.points)}</div>}
-            </div>
-            {index === ruleInputs.length - 1 && <button className="btn btn-mini shrink-0 !px-2.5 text-[15px] font-bold text-body hover:text-ink" onClick={() => setRuleInputs(p => [...p, { id: Math.random().toString(), query: "", selected: null }])} title="Thêm lỗi">+</button>}
-            
-            {item.query.trim() && !item.selected && visRules.length > 0 && <div className="absolute top-full left-0 mt-1 w-[320px] bg-white rounded-xl shadow-xl border border-line z-20 overflow-hidden">{visRules.map((rule, idx) => <button key={rule.id} className={`w-full text-left p-2.5 text-xs border-b border-line last:border-0 hover:bg-slate-50 ${idx === 0 ? "bg-slate-50" : ""}`} onClick={() => {
-              setRuleInputs(prev => prev.map(p => p.id === item.id ? { ...p, query: rule.title, selected: rule } : p));
-              inputRef.current?.focus();
-            }}><div className="flex justify-between gap-2"><span className="font-bold line-clamp-2">{rule.title}</span><span className={`font-extrabold flex-shrink-0 ${rule.type === "CREDIT" ? "text-success" : "text-red-600"}`}>{rule.type === "CREDIT" ? "+" : "−"}{fmt(rule.points)}</span></div><div className="text-[10px] text-body mt-0.5">{rule.category}</div></button>)}</div>}
-          </div>
-        )
-      })}
-    </div>
-    <div className="flex flex-col gap-2">
-      {customInputs.map((item, index) => {
-        const visCredit = getVisibleCreditRules(item.title, item.selected);
-        return (
-          <div key={item.id} className="relative flex gap-1.5">
-            <div className="relative flex-1 flex items-center h-9 rounded-[10px] border border-success/30 bg-white focus-within:border-success focus-within:ring-3 focus-within:ring-success/20 transition overflow-visible">
-              <input className="flex-1 w-full h-full text-xs bg-transparent border-none outline-none focus:ring-0 px-3 placeholder-success/60 text-success" placeholder="Việc làm tốt..." value={item.title} onChange={(e) => setCustomInputs(prev => prev.map(p => p.id === item.id ? { ...p, title: e.target.value, selected: null } : p))} disabled={saving} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void commitAll(); } }} />
-              
-              {item.selected ? (
-                <div className="flex items-center justify-center px-3 h-full bg-success/5 border-l border-success/10 text-[13px] font-extrabold text-success">
-                  +{fmt(item.selected.points)}
-                </div>
-              ) : (
-                <div className="flex items-center justify-center px-1 h-full min-w-[54px] bg-success/5 border-l border-success/10 cursor-text" onClick={(e) => { const input = e.currentTarget.querySelector('input'); if (input) input.focus(); }}>
-                  {item.points && <span className="text-[13px] font-extrabold text-success leading-none">+</span>}
-                  <input type="number" step="0.5" min="0" className="w-[36px] h-full bg-transparent text-[13px] text-center font-extrabold text-success outline-none p-0 border-none focus:ring-0 placeholder-success/40" placeholder="Điểm" value={item.points} onChange={(e) => setCustomInputs(prev => prev.map(p => p.id === item.id ? { ...p, points: e.target.value } : p))} disabled={saving} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void commitAll(); } }} style={{ MozAppearance: 'textfield' }} />
-                </div>
-              )}
-            </div>
-            
-            {item.title.trim() && !item.selected && visCredit.length > 0 && <div className="absolute top-full left-0 mt-1 w-[320px] bg-white rounded-xl shadow-xl border border-line z-50 overflow-hidden">{visCredit.map((rule, idx) => <button key={rule.id} className={`w-full text-left p-2.5 text-xs border-b border-line last:border-0 hover:bg-slate-50 ${idx === 0 ? "bg-slate-50" : ""}`} onClick={() => {
-              setCustomInputs(prev => prev.map(p => p.id === item.id ? { ...p, title: rule.title, points: String(rule.points), selected: rule } : p));
-            }}><div className="flex justify-between gap-2"><span className="font-bold line-clamp-2">{rule.title}</span><span className="font-extrabold flex-shrink-0 text-success">+{fmt(rule.points)}</span></div><div className="text-[10px] text-body mt-0.5">{rule.category}</div></button>)}</div>}
-            
-            {index === customInputs.length - 1 && <button className="btn btn-mini shrink-0 !px-2.5 text-[15px] font-bold text-white bg-success hover:bg-green-600 shadow" disabled={saving} onClick={() => {
-              const pts = parseFloat(item.points);
-              if (item.selected || (item.title.trim() && !isNaN(pts) && pts > 0)) {
-                onApplyToAll(item.selected ? item.selected.id : null, item.title, pts || (item.selected?.points ?? 0));
-                setCustomInputs([{ id: Math.random().toString(), title: "", points: "", selected: null }]);
-              } else {
-                 alert("Vui lòng nhập hoặc chọn nội dung cộng điểm trước khi áp dụng toàn lớp!");
-              }
-            }} title="Áp dụng cho toàn lớp">+</button>}
-          </div>
-        )
-      })}
-    </div>
-  </div>;
-}
-
-function RecordView({ students, rules, scoreFor, onSaved }: { students: Student[]; rules: PointRule[]; scoreFor: (id: string) => ReturnType<typeof calculateScore>; onSaved: (message: string, batchId: string) => Promise<void> }) {
-  const [activityDate, setActivityDate] = useState(today());
-  const [search, setSearch] = useState("");
-  const visibleStudents = students.filter((s) => {
-    const q = normalizeText(search);
-    return !q || s.ordinal === search.trim() || normalizeText(`${s.fullName} ${s.className} ${s.phone}`).includes(q);
-  });
-  
-  const handleApplyToAll = async (ruleId: string | null, customTitle: string, customPoints: number) => {
-    if (visibleStudents.length === 0) return;
-    try {
-      let res;
-      if (ruleId) {
-        res = await jsonRequest<{ batchId: string; points: number }>("/api/point-transactions", {
-          method: "POST",
-          body: JSON.stringify({
-            ruleId,
-            studentIds: visibleStudents.map(s => s.id),
-            activityDate,
-            note: ""
-          })
-        });
-      } else {
-        res = await jsonRequest<{ batchId: string; points: number }>("/api/point-transactions", {
-          method: "POST",
-          body: JSON.stringify({
-            customTitle: customTitle.trim(),
-            customPoints: customPoints,
-            studentIds: visibleStudents.map(s => s.id),
-            activityDate,
-            note: ""
-          })
-        });
-      }
-      await onSaved(`Đã cộng +${fmt(res.points)} cho toàn lớp (${visibleStudents.length} HS)`, res.batchId);
-    } catch (e: any) {
-      alert(e.message || "Lỗi khi áp dụng toàn lớp.");
-    }
-  };
-
-  return <><PageHead eyebrow="Nhập nhanh" title="Ghi nhận rèn luyện" sub="Chọn học sinh và gõ vài từ khóa quy tắc rồi nhấn Enter để ghi nhận." />
-    <div className="card overflow-visible">
-      <div className="section-title">
-        <h2>Đánh giá học sinh</h2>
-        <div className="flex gap-2">
-          <input className="input min-w-[260px] flex-1" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm học sinh (tên, lớp, STT)..." />
-          <input type="date" className="input" value={activityDate} onChange={(e) => setActivityDate(e.target.value)} title="Ngày ghi nhận" />
-        </div>
-      </div>
-      <div className="p-2 min-h-[400px]">
-        {!students.length && <Empty title="Chưa có học sinh">Hãy chọn một lớp từ menu góc trên, hoặc import danh sách.</Empty>}
-        {students.length > 0 && !visibleStudents.length && <Empty title="Không tìm thấy học sinh">Thử thay đổi từ khóa tìm kiếm.</Empty>}
-        {visibleStudents.map((student) => <FastRecordRow key={student.id} student={student} rules={rules} score={scoreFor(student.id).score} date={activityDate} onSaved={onSaved} onApplyToAll={handleApplyToAll} />)}
-      </div>
-    </div></>;
-}
-
 function StudentsView({ students, transactions, classFilter, scoreFor, onGo, onStudent }: { students: Student[]; transactions: PointTransaction[]; classFilter: string; scoreFor: (id: string) => ReturnType<typeof calculateScore>; onGo: (view: View) => void; onStudent: (id: string) => void }) {
   const [search, setSearch] = useState("");
   const visible = students.filter((student) => {
@@ -410,7 +223,7 @@ function StudentsView({ students, transactions, classFilter, scoreFor, onGo, onS
     sortedStudents.forEach((student, index) => {
       const stt = student.ordinal || (index + 1).toString();
       const sheetNameBase = `${stt} - ${student.fullName}`;
-      let sheetName = sheetNameBase.replace(/[\[\]\*\/\\\?\:]/g, "").substring(0, 31);
+      const sheetName = sheetNameBase.replace(/[\[\]\*\/\\\?\:]/g, "").substring(0, 31);
       let counter = 1;
       let finalSheetName = sheetName;
       while (wb.SheetNames.includes(finalSheetName)) {
@@ -463,6 +276,7 @@ function StudentsView({ students, transactions, classFilter, scoreFor, onGo, onS
 function RulesView({ rules, onAdded }: { rules: PointRule[]; onAdded: () => Promise<void> }) {
   const [type, setType] = useState<RuleType>("DEBIT"); const [search, setSearch] = useState("");
   const [creating, setCreating] = useState(false);
+  const [editingRule, setEditingRule] = useState<PointRule | null>(null);
   const [newTitle, setNewTitle] = useState("");
   const [newPoints, setNewPoints] = useState("");
   const [saving, setSaving] = useState(false);
@@ -473,50 +287,72 @@ function RulesView({ rules, onAdded }: { rules: PointRule[]; onAdded: () => Prom
     if (!newTitle.trim() || !newPoints) return;
     setSaving(true);
     try {
-      await fetch("/api/rules", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: newTitle, points: type === "CREDIT" ? Math.abs(Number(newPoints)) : -Math.abs(Number(newPoints)) })
-      });
+      if (editingRule) {
+        await fetch(`/api/rules/${editingRule.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: newTitle, points: type === "CREDIT" ? Math.abs(Number(newPoints)) : -Math.abs(Number(newPoints)) })
+        });
+      } else {
+        await fetch("/api/rules", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: newTitle, points: type === "CREDIT" ? Math.abs(Number(newPoints)) : -Math.abs(Number(newPoints)) })
+        });
+      }
       setCreating(false);
+      setEditingRule(null);
       setNewTitle(""); setNewPoints("");
       await onAdded();
-    } catch (e) {
-      alert("Lỗi khi tạo quy tắc.");
+    } catch {
+      alert("Lỗi khi lưu quy tắc.");
     } finally {
       setSaving(false);
     }
   };
 
-  return <><PageHead eyebrow="Từ file Quy ước" title="Quy tắc điểm" sub="Danh sách các lỗi trừ điểm và nội dung cộng điểm." action={<button className="btn btn-primary" onClick={() => setCreating(true)}>+ Tạo quy tắc mới</button>} /><div className="toolbar"><div className="tabs"><button className={`tab ${type === "DEBIT" ? "active" : ""}`} onClick={() => setType("DEBIT")}>Trừ điểm</button><button className={`tab ${type === "CREDIT" ? "active" : ""}`} onClick={() => setType("CREDIT")}>Cộng điểm</button></div><input className="input min-w-[260px] flex-1" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Tìm nội dung / nhóm lỗi..." /></div><div className="grid gap-2 lg:grid-cols-2">{visible.map((rule) => <div className="card grid grid-cols-[1fr_auto] gap-3 p-3.5" key={rule.id}><div><div className="text-xs font-bold leading-5">{rule.title}</div><div className="mt-1 text-[10.5px] text-body">{rule.category} · {rule.id}</div>{rule.note && <div className="mt-1 text-[10.5px] leading-4 text-body">{rule.note}</div>}</div><div className={`font-extrabold ${rule.type === "CREDIT" ? "text-success" : "text-red-600"}`}>{rule.type === "CREDIT" ? "+" : "−"}{fmt(rule.points)}</div></div>)}</div>
-  {creating && <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setCreating(false); }}><div className="modal-shell p-5" style={{ maxWidth: 400 }}><h3 className="font-extrabold text-lg mb-4">Tạo quy tắc {type === "CREDIT" ? "cộng điểm" : "trừ điểm"}</h3><div className="grid gap-3"><label className="grid gap-1"><span className="text-[11px] font-bold">Tên quy tắc</span><input className="input" placeholder="Ví dụ: Giúp đỡ bạn bè..." value={newTitle} onChange={e => setNewTitle(e.target.value)} /></label><label className="grid gap-1"><span className="text-[11px] font-bold">Số điểm {type === "CREDIT" ? "cộng" : "trừ"}</span><input type="number" className="input" placeholder="Ví dụ: 5" value={newPoints} onChange={e => setNewPoints(e.target.value)} /></label><div className="flex justify-end gap-2 mt-4"><button className="btn" onClick={() => setCreating(false)}>Hủy</button><button className="btn btn-primary" disabled={!newTitle.trim() || !newPoints || saving} onClick={save}>{saving ? "Đang lưu..." : "Tạo quy tắc"}</button></div></div></div></div>}
+  const deleteRule = async (id: string) => {
+    if (!confirm("Bạn có chắc chắn muốn xóa quy tắc này?")) return;
+    try {
+      await fetch(`/api/rules/${id}`, { method: "DELETE" });
+      await onAdded();
+    } catch {
+      alert("Lỗi khi xóa quy tắc.");
+    }
+  };
+
+  const startEdit = (rule: PointRule) => {
+    setEditingRule(rule);
+    setNewTitle(rule.title);
+    setNewPoints(String(Math.abs(rule.points)));
+    setCreating(true);
+  };
+
+  return <><PageHead eyebrow="Từ file Quy ước" title="Quy tắc điểm" sub="Danh sách các lỗi trừ điểm và nội dung cộng điểm." action={<button className="btn btn-primary" onClick={() => { setEditingRule(null); setNewTitle(""); setNewPoints(""); setCreating(true); }}>+ Tạo quy tắc mới</button>} /><div className="toolbar"><div className="tabs"><button className={`tab ${type === "DEBIT" ? "active" : ""}`} onClick={() => setType("DEBIT")}>Trừ điểm</button><button className={`tab ${type === "CREDIT" ? "active" : ""}`} onClick={() => setType("CREDIT")}>Cộng điểm</button></div><input className="input min-w-[260px] flex-1" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Tìm nội dung / nhóm lỗi..." /></div><div className="grid gap-2 lg:grid-cols-2">{visible.map((rule) => <div className="card grid grid-cols-[1fr_auto] gap-3 p-3.5 group relative" key={rule.id}><div><div className="text-xs font-bold leading-5">{rule.title}</div><div className="mt-1 text-[10.5px] text-body">{rule.category} · {rule.id}</div>{rule.note && <div className="mt-1 text-[10.5px] leading-4 text-body">{rule.note}</div>}</div><div className="flex flex-col items-end gap-1"><div className={`font-extrabold ${rule.type === "CREDIT" ? "text-success" : "text-red-600"}`}>{rule.type === "CREDIT" ? "+" : "−"}{fmt(Math.abs(rule.points))}</div><div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"><button className="btn btn-mini" onClick={() => startEdit(rule)}>Sửa</button><button className="btn btn-mini btn-danger" onClick={() => deleteRule(rule.id)}>Xóa</button></div></div></div>)}</div>
+  {creating && <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) { setCreating(false); setEditingRule(null); } }}><div className="modal-shell p-5" style={{ maxWidth: 400 }}><h3 className="font-extrabold text-lg mb-4">{editingRule ? "Sửa quy tắc" : "Tạo quy tắc"} {type === "CREDIT" ? "cộng điểm" : "trừ điểm"}</h3><div className="grid gap-3"><label className="grid gap-1"><span className="text-[11px] font-bold">Tên quy tắc</span><input className="input" placeholder="Ví dụ: Giúp đỡ bạn bè..." value={newTitle} onChange={e => setNewTitle(e.target.value)} /></label><label className="grid gap-1"><span className="text-[11px] font-bold">Số điểm {type === "CREDIT" ? "cộng" : "trừ"}</span><input type="number" className="input" placeholder="Ví dụ: 5" value={newPoints} onChange={e => setNewPoints(e.target.value)} /></label><div className="flex justify-end gap-2 mt-4"><button className="btn" onClick={() => { setCreating(false); setEditingRule(null); }}>Hủy</button><button className="btn btn-primary" disabled={!newTitle.trim() || !newPoints || saving} onClick={save}>{saving ? "Đang lưu..." : (editingRule ? "Lưu thay đổi" : "Tạo quy tắc")}</button></div></div></div></div>}
   </>;
 }
 
 function ActivityView({ transactions, onUndo }: { transactions: PointTransaction[]; onUndo: (batchId: string) => Promise<void> }) {
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState("");
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   
-  const groupedTransactions = useMemo(() => {
-    const groups = new Map<string, PointTransaction[]>();
-    for (const item of transactions) {
-      if (!groups.has(item.batchId)) groups.set(item.batchId, []);
-      groups.get(item.batchId)!.push(item);
-    }
-    return Array.from(groups.values()).map(group => {
-      if (group.length === 1) return group[0];
-      return {
-        ...group[0],
-        id: group[0].batchId,
-        studentName: `${group.length} học sinh`
-      };
-    });
-  }, [transactions]);
+  const groupedTransactions = useMemo(() => buildActivityRows(transactions), [transactions]);
 
-  const visible = groupedTransactions.filter((item) => normalizeText(`${item.studentName} ${item.ruleTitle} ${item.category} ${item.note}`).includes(normalizeText(search)));
+  const visible = groupedTransactions.filter((item) => normalizeText(item.searchText).includes(normalizeText(search)));
   const undo = async (batchId: string) => { setBusy(batchId); try { await onUndo(batchId); } finally { setBusy(""); } };
+  const toggleDetails = (id: string) => setExpandedRows((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const statusLabel = (status: string) => status === "ACTIVE" ? "Đang hiệu lực" : status === "PARTIAL" ? "Hiệu lực một phần" : "Đã hoàn tác";
   
-  return <><PageHead eyebrow="Lịch sử" title="Nhật ký cộng / trừ" sub="Mỗi học sinh là một giao dịch riêng; thao tác hàng loạt dùng cùng batch." /><div className="toolbar"><input className="input min-w-[260px] flex-1" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Tìm học sinh, nội dung, ghi chú..." /></div><div className="card table-wrap"><table className="data-table"><thead><tr><th>Ngày</th><th>Học sinh</th><th>Nội dung</th><th>Nhóm</th><th className="text-right">Điểm</th><th>Trạng thái</th><th /></tr></thead><tbody>{visible.map((item) => <tr className={item.status !== "ACTIVE" ? "opacity-45" : ""} key={item.id}><td>{fmtDate(item.activityDate)}</td><td className="font-bold">{item.studentName}</td><td className="max-w-[420px]">{item.ruleTitle}</td><td className="text-body">{item.category}</td><td className={`text-right font-extrabold ${item.points > 0 ? "text-success" : "text-red-600"}`}>{item.points > 0 ? "+" : ""}{fmt(item.points)}</td><td><span className={`badge ${item.status === "ACTIVE" ? "good" : ""}`}>{item.status === "ACTIVE" ? "Đang hiệu lực" : "Đã hoàn tác"}</span></td><td className="text-right">{item.status === "ACTIVE" && <button className="btn btn-mini btn-danger" disabled={busy === item.batchId} onClick={() => void undo(item.batchId)}>Undo batch</button>}</td></tr>)}{!visible.length && <tr><td colSpan={7}><Empty title="Chưa có nhật ký">Các giao dịch cộng/trừ điểm sẽ xuất hiện ở đây.</Empty></td></tr>}</tbody></table></div></>;
+  return <><PageHead eyebrow="Lịch sử" title="Nhật ký cộng / trừ" sub="Một lần ghi cho một học sinh được gom thành một dòng; mở chi tiết khi cần kiểm tra từng nội dung." /><div className="toolbar"><input className="input min-w-[260px] flex-1" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Tìm học sinh, nội dung, ghi chú..." /></div><div className="card table-wrap"><table className="data-table activity-table"><thead><tr><th>Thời điểm</th><th>Học sinh</th><th>Nội dung</th><th>Nhóm</th><th className="text-right">Điểm / HS</th><th>Trạng thái</th><th /></tr></thead><tbody>{visible.map((item) => {
+    const expanded = expandedRows.has(item.id);
+    return <Fragment key={item.id}><tr className={item.status === "VOIDED" ? "opacity-45" : ""}><td><strong className="activity-date">{fmtDate(item.activityDate)}</strong><small className="activity-time">{fmtTime(item.createdAt)}</small></td><td className="font-bold" title={item.studentNames.join(", ")}>{item.studentName}</td><td className="max-w-[420px]">{item.isSummary ? <div className="activity-summary-cell"><strong>{item.contentCount} nội dung</strong><button className="activity-detail-toggle" aria-expanded={expanded} onClick={() => toggleDetails(item.id)}>{expanded ? "Thu gọn" : `Xem ${item.contentCount} nội dung`}</button></div> : item.ruleTitle}</td><td className="text-body">{item.category}</td><td className={`text-right font-extrabold ${item.points > 0 ? "text-success" : "text-red-600"}`}>{item.points > 0 ? "+" : ""}{fmt(item.points)}{item.isSummary && <small className="activity-total-label">Tổng</small>}</td><td><span className={`badge ${item.status === "ACTIVE" ? "good" : item.status === "PARTIAL" ? "warn" : ""}`}>{statusLabel(item.status)}</span></td><td className="text-right">{item.showUndo && <button className="btn btn-mini btn-danger activity-undo" disabled={busy === item.batchId} title="Hoàn tác toàn bộ nội dung và học sinh trong lần ghi này" aria-label="Hoàn tác lần ghi" onClick={() => void undo(item.batchId)}>Hoàn tác lần ghi</button>}</td></tr>{item.isSummary && expanded && <tr className="activity-detail-row"><td colSpan={7}><div className="activity-detail-panel">{item.items.map((detail, index) => <div className="activity-detail-item" key={detail.id}><span className="activity-detail-index">{index + 1}</span><span className="min-w-0"><strong>{detail.ruleTitle}</strong><small>{detail.category}</small></span><b className={detail.points > 0 ? "text-success" : "text-red-600"}>{detail.points > 0 ? "+" : ""}{fmt(detail.points)}</b></div>)}</div></td></tr>}</Fragment>;
+  })}{!visible.length && <tr><td colSpan={7}><Empty title="Chưa có nhật ký">Các giao dịch cộng/trừ điểm sẽ xuất hiện ở đây.</Empty></td></tr>}</tbody></table></div></>;
 }
 
 const importLabels: Record<ImportField, string> = { fullName: "Họ và tên *", ordinal: "STT", dateOfBirth: "Ngày sinh", gender: "Giới tính", className: "Lớp", phone: "Số ĐT", note: "Ghi chú" };
@@ -644,8 +480,8 @@ function StudentDetail({ student, transactions, score, onClose, onUpdated }: { s
       });
       setEditingId(null);
       await onUpdated("Đã cập nhật điểm thành công.");
-    } catch (e: any) {
-      alert(e.message || "Lỗi khi cập nhật điểm.");
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Lỗi khi cập nhật điểm.");
     } finally {
       setSaving(false);
     }
@@ -659,8 +495,8 @@ function StudentDetail({ student, transactions, score, onClose, onUpdated }: { s
     try {
       await jsonRequest(`/api/point-transactions/${item.id}`, { method: "DELETE" });
       await onUpdated("Đã xóa lượt ghi điểm thành công.");
-    } catch (e: any) {
-      alert(e.message || "Lỗi khi xóa lượt ghi điểm.");
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Lỗi khi xóa lượt ghi điểm.");
     } finally {
       setSaving(false);
     }
